@@ -1,0 +1,65 @@
+name: Build and attach release assets
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tagged commit belongs to main
+        id: tag_on_main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          TAG_SHA="$(git rev-list -n 1 "${GITHUB_REF}")"
+          if git merge-base --is-ancestor "${TAG_SHA}" origin/main; then
+            echo "is_on_main=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "is_on_main=false" >> "${GITHUB_OUTPUT}"
+            echo "Tag does not point to a commit on main. Skipping release build."
+          fi
+
+      - name: Setup Python
+        if: steps.tag_on_main.outputs.is_on_main == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        if: steps.tag_on_main.outputs.is_on_main == 'true'
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build executable
+        if: steps.tag_on_main.outputs.is_on_main == 'true'
+        shell: pwsh
+        run: ./build_exe.ps1 -Clean
+
+      - name: Package release asset
+        if: steps.tag_on_main.outputs.is_on_main == 'true'
+        id: package
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $assetName = "nDisplayLauncherGenerator-$tag-windows-x64.zip"
+          Compress-Archive -Path "dist/nDisplayLauncherGenerator.exe" -DestinationPath $assetName -Force
+          "asset_path=$assetName" >> $env:GITHUB_OUTPUT
+
+      - name: Upload asset to GitHub Release
+        if: steps.tag_on_main.outputs.is_on_main == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: ${{ steps.package.outputs.asset_path }}
+          generate_release_notes: true

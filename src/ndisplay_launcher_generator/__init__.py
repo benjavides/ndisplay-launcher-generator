@@ -1,0 +1,2 @@
+"""nDisplay launcher generator package."""
+
